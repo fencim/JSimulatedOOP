@@ -24,7 +24,7 @@ Implemented Functions:
 -Include
 -getURLParameter  
 -Logger
-  -Log
+	-Log
 	-Debug
 	-Warning
 	-Error
@@ -532,10 +532,19 @@ var JsClass = (function(){
 			});		
 		var Implements = Constructor.Inherits || Constructor.Implements || [];
 		var hasBase  = ((Implements) instanceof Array) || ((Implements) instanceof Object);		
-		var inherits = (Implements instanceof Array) ? Implements : [Implements];			
+		var inherits = (Implements instanceof Array) ? Implements : [Implements];					
 		if(hasBase){
 			for(var i=0; i < inherits.length;i++){				
-				var base = (inherits[i] instanceof Array) ? inherits[i][0] : inherits[i];
+				var base = (inherits[i] instanceof Array) ? inherits[i][0] : inherits[i];	
+				Implements = base.Inherits || base.Implements || null;
+				if (Implements instanceof Array) {
+					for (var nBaseNdx = 0; nBaseNdx < Implements.length; nBaseNdx++) {
+						if(inherits.indexOf(Implements[nBaseNdx]) < 0) {
+							inherits.splice(i + nBaseNdx, 0, Implements[nBaseNdx]);
+						}
+					};
+					base = (inherits[i] instanceof Array) ? inherits[i][0] : inherits[i];				
+				}	
 				for(var key in base.prototype){
 					if (constructor.prototype.hasOwnProperty(key) || $base.hasOwnProperty(key)) {
 						continue;
@@ -808,8 +817,17 @@ var JsClass = (function(){
 								var delegates = priv['d_' + name]; 
 								if(!(arguments.callee.caller) || !(delegates) || (delegates.indexOf(arguments.callee.caller) < 0)) {		
 									for (var i = 0;(delegates instanceof Array) && (i < delegates.length); i++) {
-										if(delegates[i] !== arguments.callee) {
-											_scope(ThisClass)(delegates[i], this, arguments);
+										if(delegates[i] !== arguments.callee) {		
+											var bMethod = delegates[i];									
+											_scope(ThisClass)(bMethod, this, arguments);
+											if(bMethod.callCount) {
+												bMethod.callCount--;
+												if(bMethod.callCount <= 0) {
+													delegates.splice(delegates.indexOf(bMethod), 1);
+													i--;
+												}
+											}
+											bMethod = null;
 										}
 										else {
 											_scope(ThisClass)(f, this.self, arguments);
@@ -864,11 +882,16 @@ var JsClass = (function(){
 				return m;
 			};
 			SimulateMethod.prototype = {
-				push : function pushMethod(callBack, ThisArg){
+				push : function pushMethod(callBack, ThisArg, counter){
 					if(typeof callBack !== 'function') return false;  
 					this._delegates = this._delegates || [];
 					if(this._delegates.indexOf(callBack) < 0) {
-						return this._delegates.push(ThisArg ? callBack.bind(ThisArg) : callBack);			
+						var bMethod = ThisArg ? callBack.bind(ThisArg) : callBack;
+						this._delegates.push(bMethod);
+						if((typeof counter != 'undefined') && counter){
+							bMethod.callCount = counter;
+						}
+						return bMethod;			
 					}
 					return false;
 				},
@@ -1010,7 +1033,7 @@ var JsClass = (function(){
 		return function(extension, src) {
 			var object = null;
 			if (Core.isPlainObject(extension) && (typeof src === 'string')) {
-				var filename = src.substring(src.lastIndexOf('/')+1);
+				var filename = src.substring(src.lastIndexOf('/'));
 				var extItem;
 				for(var extendUrl in stack) {
 					if(extendUrl.indexOf(filename) >= 0) {
@@ -1063,7 +1086,14 @@ var JsClass = (function(){
 				object = extension;
 			}
 			else {
-				throw new Error('No Target Object for the Extentsion');
+				if (extension && extension.Is && !src) {
+					for (var srcExt in stack) {
+						if(stack[srcExt].obj === extension) {
+							return srcExt;
+						}
+					}
+				}
+				return false;
 			}
 			if(stack[src] && stack[src].data) {
 				return function returnCallBack (callBack) {
