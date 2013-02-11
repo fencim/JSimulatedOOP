@@ -160,6 +160,94 @@ var Include = _.Include = (function(){
 	return include
 })();
 
+var Ajax = (function(){
+	function getHttpRequestObject()
+	{
+		// Define and initialize as false
+		var xmlHttpRequst = false;
+	 
+		// Mozilla/Safari/Non-IE
+	    if (window.XMLHttpRequest)
+		{
+	        xmlHttpRequst = new XMLHttpRequest();
+	    }
+	    // IE
+	    else if (window.ActiveXObject)
+		{
+	        xmlHttpRequst = new ActiveXObject("Microsoft.XMLHTTP");
+	    }
+		return xmlHttpRequst;
+	}	 
+	// Does the AJAX call to URL specific with rest of the parameters
+	function doAjax(url, method, async, responseHandler, data, mimeType)
+	{
+		
+		// Set the variables
+		url = url || "";
+		method = method || "GET";
+		async = (typeof async === 'undefined') ? true : async;
+		data = data || null;
+	 	mimeType = mimeType || 'application/x-www-form-urlencoded';
+		if(url == "")
+		{
+			alert("URL can not be null/blank");
+			return false;
+		}
+		var xmlHttpRequst = getHttpRequestObject();
+	 
+	 	var readyStateHandler = (function(ajax, callback){
+	 		return function(){
+	 			if((ajax.readyState === 4) && (ajax.status === 200) 
+	 				&& (typeof callback === 'function')) {
+	 				callback(ajax.responseText);
+	 			}
+	 		};
+	 	})(xmlHttpRequst, responseHandler);
+		// If AJAX supported
+		if(xmlHttpRequst != false)
+		{
+			// Open Http Request connection
+			if(method == "GET")
+			{
+				url = url + (data ? ("?" + data) : "");
+				data = null;
+			}
+			xmlHttpRequst.open(method, url, async);
+			// Set request header (optional if GET method is used)
+			if(method == "POST")
+			{
+				xmlHttpRequst.setRequestHeader('Content-Type', mimeType);
+			}
+			// Assign (or define) response-handler/callback when ReadyState is changed.
+			xmlHttpRequst.onreadystatechange = readyStateHandler;
+			// Send data
+			xmlHttpRequst.send(data);
+		}
+		else
+		{
+			alert("Please use browser with Ajax support.!");
+		}
+	}
+	return doAjax;
+})();
+
+var Require = (function(){
+	function responseHandler(script, callback){
+		return function(data){			
+			try{
+				eval(data);	
+			}catch(e){};			
+			if(typeof callback === 'function'){
+				callback(data);
+			}				
+		};	
+	};
+	function require(script, callback){
+		Ajax(script, 'GET', false, responseHandler(script, callback), null, 'application/javascript');		
+	};
+	return require;
+})();
+
 _.getURLParameter = function (name) {
     return decodeURI(
         (RegExp(name + '=' + '(.+?)(&|$)').exec(location.search)||[,null])[1]
@@ -224,7 +312,8 @@ var __LINE = (function(){
   	function getLine(stack){
 	  	var error = (new origError());
 	  	var line = error.stack.split("\n")[3 + (stack || 0)];
-	  	var fileArr = (line.indexOf('@') > 0) ? line.split("@") : line.split("(");
+	  	var fileArr = (line.indexOf('@') > 0) ? line.split("@") : 
+	  		(line.indexOf(' at ')?line.split(" at "):line.split("("));
 	  	var fileName = fileArr[fileArr.length - 1];
 	  	fileArr = null;
 	  	line = null;
@@ -308,8 +397,14 @@ var Namespace = function(ns, nsObj, callback) {
 	if (!ns || (typeof ns !== 'string')) {
 		throw new Error('Supplied namespace is not valid');
 	}	
+	if (nsObj === null) {
+		throw new Error('Supplied namespace object is not valid');
+	}
 	var names = ns.split('.');
 	var top = (names[0] != 'this' || !names.splice(0,1)) ? window : nsObj;
+	if(ns.indexOf('this.') == 0){
+		nsObj = undefined;
+	}
 	var name = '';
 	var _ns = '';
 	for (var i = 0; i < names.length - 1; i++) {
@@ -323,10 +418,17 @@ var Namespace = function(ns, nsObj, callback) {
 	}			
 	name = names[names.length-1];
 	if (top.hasOwnProperty(name)) {
-		return top[name];				
+		if((typeof nsObj === 'undefined') || (nsObj === null)){
+			return top[name];
+		}else if(top[name] !== nsObj) {
+			throw new Error('Supplied namespace is already defined');	
+		}
+		return nsObj;							
 	}
-	else{
+	else if ((typeof nsObj !== 'undefined') && (nsObj !== null)){
 		(top[name] = nsObj || {}).Namespace = ns;
+	}else{
+		throw new Error('Supplied namespace object is not valid');
 	}	
 	if(callback && typeof callback === 'function'){
 		callback.call(nsObj, ns);
@@ -512,6 +614,21 @@ var JsClass = (function(){
 				Core.Prop(Constructor, propName, staticFields[key], access_modifier);
 			}  						
 		}
+		var $privates = { };
+		Core.Prop(StaticObject, '$privates', 
+			null, 
+			function(val){}, 
+			function(){ 
+				if(Constructor.prototype.base && (Constructor.prototype.base.length > 0)) {
+					var _privExtended = $privates;
+					for (var nBase = 0; nBase < Constructor.prototype.base.length; nBase++) {
+						Core.extend(_privExtended, Constructor.prototype.base[nBase].$privates); 
+					};
+					return _privExtended;
+				}
+				return $privates; 
+			}, 
+			'protected');		
 		delete StaticObject.prototype;
 		StaticObject = null;
 		var parents = [];
@@ -544,7 +661,7 @@ var JsClass = (function(){
 						}
 					};
 					base = (inherits[i] instanceof Array) ? inherits[i][0] : inherits[i];				
-				}	
+				}
 				for(var key in base.prototype){
 					if (constructor.prototype.hasOwnProperty(key) || $base.hasOwnProperty(key)) {
 						continue;
@@ -605,6 +722,7 @@ var JsClass = (function(){
 			var $ = 1;
 			var dict = {};
 			return function(obj, keep){
+				keep = ((keep === undefined) && window['record']) ? true : keep;
 				if((typeof obj === 'string') && (dict[obj])){
 					return dict[obj];
 				}else{
@@ -698,11 +816,16 @@ var JsClass = (function(){
 						var priv = _scope(Object.getPrototypeOf(this).constructor)(Object.getOwnPropertyDescriptor(this,'$privates').get,this);						
 						var oldVal = priv['_' + propName];
 						priv['_' + propName] = val;
+						var retVal;
 						//observable
 						var delegates = priv['d_' + propName];
 						for (var i = 0;(delegates instanceof Array) && (i < delegates.length); i++) {
-							(delegates[i]).call(this, val, propName, oldVal);
+							var ret = (delegates[i]).call(this, val, propName, oldVal);
+							retVal = (typeof retVal === 'undefined') ? ret : retVal;
 						};	
+						if (typeof retVal !== 'undefined'){
+							priv['_'+propName] = retVal;
+						}
 						oldVal = null;						
 					}	
 					priv = null;				 					
@@ -722,7 +845,8 @@ var JsClass = (function(){
 						return $hash_callBack(propName);						
 					}
 					else if (descriptor = Object.getOwnPropertyDescriptor(this,'$privates')) {
-						return ((_scope(Object.getPrototypeOf(this).constructor)(descriptor.get,this))['_' + propName]) || defaultVal;
+						var val;
+						return ((val = (_scope(Object.getPrototypeOf(this).constructor)(descriptor.get,this))['_' + propName]) !== undefined) ? val : defaultVal;
 					}					
 				}	
 			})(name, getterCallback, val, access_modifier);
@@ -756,7 +880,8 @@ var JsClass = (function(){
 			var commonProto = Object.getPrototypeOf(proto);
 			var leafProto = (commonProto && Object.getPrototypeOf(commonProto)) || commonProto;
 			var leafDesc;
-			var descriptor = Object.getOwnPropertyDescriptor(proto, propName);			
+			var descriptor = Object.getOwnPropertyDescriptor(proto, propName);
+			var scope = _scope(proto.constructor);			
 			if((setter = (descriptor && descriptor.set) 
 				|| ((leafDesc = Object.getOwnPropertyDescriptor(leafProto, propName)) && (setter = leafDesc.set))) 
 				&& (privates = object.$privates)) {
@@ -765,10 +890,11 @@ var JsClass = (function(){
 				bindSetter = (function(obj, propName, callback){
 					var oldVal = obj[propName];
 					return function observer(val) {
-						_scope((obj && obj.constructor) || obj)(
-							callback, obj, [oldVal, val, propName]
+						var ret = _scope((obj && obj.constructor) || obj)(
+							callback, obj, [val, oldVal, propName]
 						);												
-						oldVal = val;
+						oldVal = obj[propName];
+						return ret;
 					};
 				})(object, propName, callback);				
 				setter._delegates = (privates['d_' + propName]) || (privates['d_' + propName] = []);
@@ -776,10 +902,21 @@ var JsClass = (function(){
 				delete setter._delegates;
 				return callback;
 			}
+			scope();
+			scope = null;
 		},
 		method : (function(){
 			function SimulateMethod(constructor, name, func, access){
-				var m = (function(f, accs){
+				var TheClass = constructor; 
+				if (typeof TheClass !== 'function') {
+					if(typeof TheClass.prototype === 'function'){
+						TheClass = TheClass.prototype;
+					}
+					else{
+						TheClass = TheClass.prototype.constructor;
+					}
+				}
+				var m = (function(f, accs, clss){						
 						var method = function Method() {
 							if((accs & Consts.AccessModifiers.private) && (window['$this'] !== Object.getPrototypeOf(this).constructor)) {
 								throw new Error("Cannot Access Private Property");
@@ -809,11 +946,24 @@ var JsClass = (function(){
 								}).bind(ThisArg);								
 							})(this, name, f),'base');
 							var ThisClass =  (!this.prototype && Object.getPrototypeOf(this).constructor) || this;
-							var ret = _scope(ThisClass)(f, this.self || this, arguments);
+							var ret = _scope(clss)(f, this.self || this, arguments);
 							scope_base(); scope_base = null;
+							
+							var _$privates = [];							
 							var descriptor = Object.getOwnPropertyDescriptor(this, '$privates');
-							var priv = _scope(ThisClass)((descriptor && descriptor.get) || function(){} ,this);
-							if(priv) {
+							var $privates = _scope(ThisClass)((descriptor && descriptor.get) || function(){} ,this);
+							if($privates) {
+								_$privates.push($privates);
+								$privates = null;
+							}
+							var sDescriptor = Object.getOwnPropertyDescriptor(ThisClass, '$privates');
+							var s$privates = _scope(ThisClass)((sDescriptor && sDescriptor.get) || function(){} ,ThisClass);
+							if(s$privates && (s$privates !== $privates)) {
+								_$privates.push(s$privates);
+								s$privates = null;
+							}
+							for (var nPriv = 0; nPriv < _$privates.length; nPriv++) {
+								var priv = _$privates[nPriv];							
 								var delegates = priv['d_' + name]; 
 								if(!(arguments.callee.caller) || !(delegates) || (delegates.indexOf(arguments.callee.caller) < 0)) {		
 									for (var i = 0;(delegates instanceof Array) && (i < delegates.length); i++) {
@@ -837,8 +987,10 @@ var JsClass = (function(){
 								}	
 								delegates = null;
 								priv = null;	
-							}
-							ThisClass = null;							
+							};
+							ThisClass = null;	
+							_$privates = null;	
+							$privates = null;					
 							return ret;		
 						};
 						return (function(m,n){
@@ -873,7 +1025,7 @@ var JsClass = (function(){
 								return boundedM;
 							};
 						})(method, name);
-					})(func, access); 	
+					})(func, access, TheClass); 	
 				Object.defineProperty(constructor.prototype, name, {
 					get :  m, 
 					enumerable : true,
@@ -928,6 +1080,15 @@ var JsClass = (function(){
 					configurable : true
 				}
 			);
+		},
+		HookMethod : function(jsClass, methodName, callBack) {
+			var desctr = Object.getOwnPropertyDescriptor(jsClass.prototype, methodName);
+			if(desctr && desctr.get) {
+				var method = desctr.get.call(jsClass);
+				method.push(callBack);
+			}else{
+				Log("Hook Failed: undefined method " + methodName, 1);
+			}
 		},
 		//From jQuery
 		isFunction: function( obj ) {
@@ -1194,4 +1355,4 @@ var JsClass = (function(){
 		}, obj, [type]));	
 	};
 	return _;
-})();	
+})();
