@@ -79,7 +79,7 @@ var Include = _.Include = (function(){
 			_.DettachEvent(e.target, 'load', next);
 			//e.target.removeEventListener('load',next);
 			var callbacks = scripts[curr-1].callbacks;
-			scripts[curr-1].loadWrapper = true; 
+			scripts[curr-1].loaded = true; 
 			if(callbacks.length > 0){
 				var i = callbacks.length;
 				while(i--){
@@ -137,7 +137,7 @@ var Include = _.Include = (function(){
 			if(scripts[i].path == scriptPath){
 				dup = true;
 				if (optCallback) {
-					if(scripts[i].loadWrapper){
+					if(scripts[i].loaded){
 						optCallback();
 					} else {
 						scripts[i].callbacks.unshift(optCallback);
@@ -559,7 +559,7 @@ var JsClass = (function(){
 							}
 							passArgs[0] =  arg;
 						};
-					},this);
+					},this, arguments);
 					_scope(base)(base.$constructor, this, passArgs);									
 				};			
 			};			
