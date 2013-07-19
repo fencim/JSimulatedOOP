@@ -79,7 +79,7 @@ var Include = _.Include = (function(){
 			_.DettachEvent(e.target, 'load', next);
 			//e.target.removeEventListener('load',next);
 			var callbacks = scripts[curr-1].callbacks;
-			scripts[curr-1].loaded = true; 
+			scripts[curr-1].loadWrapper = true; 
 			if(callbacks.length > 0){
 				var i = callbacks.length;
 				while(i--){
@@ -137,7 +137,7 @@ var Include = _.Include = (function(){
 			if(scripts[i].path == scriptPath){
 				dup = true;
 				if (optCallback) {
-					if(scripts[i].loaded){
+					if(scripts[i].loadWrapper){
 						optCallback();
 					} else {
 						scripts[i].callbacks.unshift(optCallback);
@@ -150,8 +150,7 @@ var Include = _.Include = (function(){
 			var cbs = [];
 			if(optCallback) cbs.unshift(optCallback);
 			scripts.push({path:scriptPath,callbacks:cbs,loaded:false});
-		}
- 
+		} 
 		if(!busy && inited) next();
 	};
 	for (var nIndex = 0; nIndex < arguments.length; nIndex++) {
@@ -164,8 +163,7 @@ var Ajax = (function(){
 	function getHttpRequestObject()
 	{
 		// Define and initialize as false
-		var xmlHttpRequst = false;
-	 
+		var xmlHttpRequst = false;	 
 		// Mozilla/Safari/Non-IE
 	    if (window.XMLHttpRequest)
 		{
@@ -180,8 +178,7 @@ var Ajax = (function(){
 	}	 
 	// Does the AJAX call to URL specific with rest of the parameters
 	function doAjax(url, method, async, responseHandler, data, mimeType)
-	{
-		
+	{		
 		// Set the variables
 		url = url || "";
 		method = method || "GET";
@@ -291,13 +288,13 @@ function Warning(msg){
 }
 
 var origError = Error || function(){};
-Error = function(msg){
+/*Error = function(msg){
 	Log(msg, "ERROR");
 	if(this.__proto__){
 		this.__proto__ = origError.prototype;	
 	}
 	return new origError(msg + '\r\nLine:' + __LINE().slice(0,-1).slice(0, 3).join(':'));
-};
+};*/
 /*_.defineProperty = function(obj, propName, descriptor){
 	if (!(/MSIE (\d+\.\d+);/.test(navigator.userAgent))){
 		return Object.defineProperty(obj, propName, descriptor);
@@ -500,6 +497,14 @@ var JsClass = (function(){
 			return false;
 		}
 	};	
+	function _validateModifier(jsclass, propName, access_modifier){
+		if((access_modifier & Consts.AccessModifiers.private) && 
+			((Object.getPrototypeOf(this).constructor != window['$this']) && (window['$this'] != jsclass))) {
+			throw new Error("Cannot Access Private Member "+propName);
+		}else if ((access_modifier & Consts.AccessModifiers.protected)  && (this.Is && !this.Is(jsclass))) {
+			throw new Error("Cannot Access Protected Member"+propName);										
+		};
+	}
 	var _ = function JsClass(){		
 		var arg0 = arguments[0],
 			args = arguments, className = '', instanceFields, staticFields, constructor;
@@ -541,18 +546,20 @@ var JsClass = (function(){
 					var args =!(inherits[i] instanceof Array) ? [] : inherits[i][1];
 					var passArgs = [];
 					var counter = 0;
-					for (var j = 0; j < args.length; j++) {
-						var arg = args[j];
-						if(typeof arg === 'string'){
-							if((arg.substr(0, 1) == "{") && (arg.substr(arg.length-1) == "}")){
-								var ndex = parseInt(arg.substr(1, arg.length - 2));
-								arg = !isNaN(ndex) ? arguments[ndex] : arguments[counter++]; 
-							}else if((arg.substr(0, 5) == "eval(") && (arg.substr(arg.length-1) == ")")) {
-								arg = eval(arg.substr(5, arg.length - 6));						 
+					_scope(ClassDec)(function(){
+						for (var j = 0; j < args.length; j++) {
+							var arg = args[j];
+							if(typeof arg === 'string'){
+								if((arg.substr(0, 1) == "{") && (arg.substr(arg.length-1) == "}")){
+									var ndex = parseInt(arg.substr(1, arg.length - 2));
+									arg = !isNaN(ndex) ? arguments[ndex] : arguments[counter++]; 
+								}else if((arg.substr(0, 5) == "eval(") && (arg.substr(arg.length-1) == ")")) {
+									arg = eval(arg.substr(5, arg.length - 6));						 
+								}
 							}
-						}
-						passArgs[0] =  arg;
-					};
+							passArgs[0] =  arg;
+						};
+					},this);
 					_scope(base)(base.$constructor, this, passArgs);									
 				};			
 			};			
@@ -609,9 +616,21 @@ var JsClass = (function(){
 				}				
 			}
 			else if (isStatic) {
-				Constructor[propName] = staticFields[key];
+				var desc = Object.getOwnPropertyDescriptor(staticFields, key);
+				if (desc && (desc.set || desc.get)) {
+					Core.Prop(StaticObject, propName, null, 
+						desc.set, desc.get, access_modifier);
+				}else{
+					Constructor[propName] = staticFields[key];
+				}
 			}else {
-				Core.Prop(Constructor, propName, staticFields[key], access_modifier);
+				var desc = Object.getOwnPropertyDescriptor(staticFields, key);
+				if(desc && (desc.set || desc.get)){
+					Core.Prop(Constructor, propName, null, 
+						desc.set, desc.get, access_modifier);
+				}else{
+					Core.Prop(Constructor, propName, staticFields[key], undefined, undefined, access_modifier);
+				}				
 			}  						
 		}
 		var $privates = { };
@@ -652,7 +671,8 @@ var JsClass = (function(){
 		var inherits = (Implements instanceof Array) ? Implements : [Implements];					
 		if(hasBase){
 			for(var i=0; i < inherits.length;i++){				
-				var base = (inherits[i] instanceof Array) ? inherits[i][0] : inherits[i];	
+				var base = (inherits[i] instanceof Array) ? inherits[i][0] : inherits[i];
+				if(typeof base === 'undefined') throw new Error("Base Undefined");	
 				Implements = base.Inherits || base.Implements || null;
 				if (Implements instanceof Array) {
 					for (var nBaseNdx = 0; nBaseNdx < Implements.length; nBaseNdx++) {
@@ -691,6 +711,17 @@ var JsClass = (function(){
 							enumerable : true,
 							configurable : true
 						});						
+					}else{
+						Object.defineProperty(Constructor, key, {
+							set : (function(b,k){
+								return function(val){ b[k] = val; };
+							})(base, key),
+							get : (function(b,k){
+								return function(){ return b[k]; };
+							})(base, key),
+							enumerable : true,
+							configurable : true
+						});
 					}
 					descriptor = null;
 				}
@@ -791,6 +822,18 @@ var JsClass = (function(){
 			return null;			
 		},
 		Prop : function(constructor, name, val, setterCallback, getterCallback, access_modifier){
+			var TheClass = constructor; 
+			if (typeof TheClass !== 'function') {
+				if(typeof TheClass.constructor === 'function'){
+					TheClass = TheClass.constructor;
+				}
+				else if(typeof TheClass.prototype === 'function'){
+					TheClass = TheClass.prototype;
+				}
+				else{
+					TheClass = TheClass.prototype.constructor;
+				}
+			}
 			var setterProp, getterProp;
 			var proto = constructor.prototype 
 				|| (getterCallback && constructor) 
@@ -800,15 +843,9 @@ var JsClass = (function(){
 			if(proto.hasOwnProperty(name)) {
 				return;
 			};
-			setterProp = (function(propName, $hash_callBack, access_mod){
-				return function $propSetter(val){					
-					if((access_mod & Consts.AccessModifiers.private) && (window['$this'] !== Object.getPrototypeOf(this).constructor)) {
-						throw new Error("Cannot Access Private Property");
-					}else if ((access_mod & Consts.AccessModifiers.protected)  && (window['$this'] !== Object.getPrototypeOf(this).constructor)) {
-						if(this.base && (this.base.indexOf(window['$this']) < 0)) {
-							throw new Error("Cannot Access Protected Property");
-						}
-					};
+			setterProp = (function(propName, $hash_callBack, access_mod, clss){
+				return function $propSetter(val){
+					_validateModifier.call(this, clss, propName, access_mod);
 					if(typeof $hash_callBack === 'function') {
 						$hash_callBack(propName, val);
 					}
@@ -830,26 +867,20 @@ var JsClass = (function(){
 					}	
 					priv = null;				 					
 				};
-			})(name, setterCallback, access_modifier);
-			getterProp = (function(propName, $hash_callBack, defaultVal, access_mod){
+			})(name, setterCallback, access_modifier, TheClass);
+			getterProp = (function(propName, $hash_callBack, defaultVal, access_mod, clss){
 				return function $propGetter(){
-					if((access_mod === 'private') && (window['$this'] !== Object.getPrototypeOf(this).constructor)) {
-						throw new Error("Cannot Access Private Property");
-					}else if ((access_mod == 'protected')  && (window['$this'] !== Object.getPrototypeOf(this).constructor)) {
-						if(this.base && (this.base.indexOf(window['$this']) < 0)) {
-							throw new Error("Cannot Access Protected Property");
-						}
-					}
+					_validateModifier.call(this, clss, propName, access_mod);					
 					var descriptor;
 					if(typeof $hash_callBack === 'function'){
-						return $hash_callBack(propName);						
+						return $hash_callBack.call(this, propName);						
 					}
 					else if (descriptor = Object.getOwnPropertyDescriptor(this,'$privates')) {
 						var val;
 						return ((val = (_scope(Object.getPrototypeOf(this).constructor)(descriptor.get,this))['_' + propName]) !== undefined) ? val : defaultVal;
 					}					
 				}	
-			})(name, getterCallback, val, access_modifier);
+			})(name, getterCallback, val, access_modifier, TheClass);
 			Object.defineProperty(proto, name, {
 				set : setterProp,
 				get : getterProp,
@@ -880,7 +911,7 @@ var JsClass = (function(){
 			var commonProto = Object.getPrototypeOf(proto);
 			var leafProto = (commonProto && Object.getPrototypeOf(commonProto)) || commonProto;
 			var leafDesc;
-			var descriptor = Object.getOwnPropertyDescriptor(proto, propName);
+			var descriptor = Object.getOwnPropertyDescriptor(proto, propName) || Object.getOwnPropertyDescriptor(object, propName);
 			var scope = _scope(proto.constructor);			
 			if((setter = (descriptor && descriptor.set) 
 				|| ((leafDesc = Object.getOwnPropertyDescriptor(leafProto, propName)) && (setter = leafDesc.set))) 
@@ -917,14 +948,7 @@ var JsClass = (function(){
 					}
 				}
 				var m = (function(f, accs, clss){						
-						var method = function Method() {
-							if((accs & Consts.AccessModifiers.private) && (window['$this'] !== Object.getPrototypeOf(this).constructor)) {
-								throw new Error("Cannot Access Private Property");
-							}else if ((accs & Consts.AccessModifiers.protected)  && (window['$this'] !== Object.getPrototypeOf(this).constructor)) {
-								if(this.base && (this.base.indexOf(window['$this']) < 0)) {
-									throw new Error("Cannot Access Protected Property");
-								}
-							};									
+						var method = function Method() {							
 							var scope_base = _scope((function(ThisArg, n, m){								
 								return (function(){
 									var ret;
@@ -937,7 +961,7 @@ var JsClass = (function(){
 													return ret;
 												}
 												if(typeof bMethod === 'function'){
-													ret = bMethod.apply(this, arguments)
+													ret = _scope(Object.getPrototypeOf(this).base[nBase])(bMethod, this, arguments);
 												}
 											}
 										};
@@ -980,8 +1004,7 @@ var JsClass = (function(){
 											bMethod = null;
 										}
 										else {
-											_scope(ThisClass)(f, this.self, arguments);
-											f.apply(this.self, arguments);
+											_scope(clss)(f, this.self, arguments);
 										}					
 									};
 								}	
@@ -995,6 +1018,7 @@ var JsClass = (function(){
 						};
 						return (function(m,n){
 							return function(dontbind){
+								if(!dontbind) _validateModifier.call(this, clss, n, accs);					
 								var boundedM;
 								var privM = Object.getOwnPropertyDescriptor(this, '$privates');
 								var priv;
@@ -1193,23 +1217,27 @@ var JsClass = (function(){
 		var stack = {};
 		return function(extension, src) {
 			var object = null;
-			if (Core.isPlainObject(extension) && (typeof src === 'string')) {
-				var filename = src.substring(src.lastIndexOf('/'));
-				var extItem;
-				for(var extendUrl in stack) {
-					if(extendUrl.indexOf(filename) >= 0) {
-						extItem = stack[extendUrl];
-						break;
+			if (Core.isPlainObject(extension) && ((typeof src === 'string') || ((src === undefined) && this.Is))) {
+				if(src){
+					var filename = src.substring(src.lastIndexOf('/'));
+					var extItem;
+					for(var extendUrl in stack) {
+						if(extendUrl.indexOf(filename) >= 0) {
+							extItem = stack[extendUrl];
+							break;
+						}
 					}
+					if(!extItem) {
+						throw new Error('No Extentsion');
+						return;
+					}
+					object = extItem.obj;
+					delete extItem.obj;	
+				}else{
+					object = this;
 				}
-				if(!extItem) {
-					throw new Error('No Extentsion');
-					return;
-				}
-				object = extItem.obj;
-				delete extItem.obj;
 				if (extension) {
-					var ThisObject = { prototype : object };							
+					var ThisObject = { prototype : object };										
 					for (var key in extension) {
 						var propName = key;
 						var access_modifier = Consts.AccessModifiers.public;
@@ -1228,15 +1256,27 @@ var JsClass = (function(){
 								Core.method(ThisObject, propName, extension[key], access_modifier);
 							}
 						}else {
-							object[propName] = extension[key];
+							if(object.hasOwnProperty(propName)){
+								object[propName] = extension[key];	
+							}else{	
+								Core.Prop(ThisObject, propName, extension[key], undefined, undefined, access_modifier);
+							}
+							
 						} 
 					}					
 				}
-				if(extItem.callback) {
-					extItem.callback();
-					delete extItem.callback;
+				if(typeof extension.extended === 'function'){
+					_scope(Object.getPrototypeOf(object).constructor)(
+						extension.extended, object
+					);
 				}
-				extItem.data = extension;
+				if(src){
+					if(extItem.callback) {
+						extItem.callback();
+						delete extItem.callback;
+					}					
+					extItem.data = extension;	
+				}				
 				return;
 			}
 			else if ((typeof extension === 'string') && this.Is && !src ) {
@@ -1315,9 +1355,6 @@ var JsClass = (function(){
 					delete this.self[Object.getPrototypeOf(this).constructor.$];
 					delete this.Is;
 				}
-			}			
-			if(Object.getPrototypeOf(this) && (Object.getPrototypeOf(this).name) && (Object.getPrototypeOf(this).name != "Empty")) {
-				//Object.getPrototypeOf(this) = null;	
 			}			
 			for(var key in this){				
 				ret = (delete this[key]) || ret;				
